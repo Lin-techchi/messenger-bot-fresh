@@ -1,21 +1,17 @@
-const fetch = require("node-fetch");
+// server.js
 const express = require("express");
 const bodyParser = require("body-parser");
-
-console.log("Starting server...");
+const request = require("request");
+require("dotenv").config();
 
 const app = express();
 app.use(bodyParser.json());
 
-// --------------------
-// CONFIG
-// --------------------
-const VERIFY_TOKEN = "mybotverify"; // your verify token
-const PAGE_ACCESS_TOKEN = "EAAOUTb7FiWYBQBTmeSoobKBpC3th2X1RzlLPnZCb3DctZAc16Vya0f7fszh4iIviW6R9496kwFizjzWvV545xhxqGLAuRZAN6Ph6WCs3yQBfj1RvZCFvVO7iuzwIGUG8waRaF0s7irgrrjwfoLfZChZAeRrz9ezrb8WGVzeLF4uq4Rsra1g0JBeGGY3Sb9J69eD2DdrecD6gZDZD";
+// Tokens
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "mybotverify";
 
-// --------------------
-// VERIFICATION ENDPOINT
-// --------------------
+// Webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -23,35 +19,27 @@ app.get("/webhook", (req, res) => {
 
   if (mode && token) {
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("Webhook verified!");
-      return res.status(200).send(challenge);
+      console.log("WEBHOOK_VERIFIED");
+      res.status(200).send(challenge);
     } else {
-      return res.sendStatus(403);
+      res.sendStatus(403);
     }
-  } else {
-    return res.sendStatus(403);
   }
 });
 
-// --------------------
-// MESSAGE RECEIVER
-// --------------------
-app.post("/webhook", async (req, res) => {
+// Receive messages
+app.post("/webhook", (req, res) => {
   const body = req.body;
 
   if (body.object === "page") {
-    for (const entry of body.entry) {
-      const event = entry.messaging[0];
-      const sender = event.sender.id;
+    body.entry.forEach(entry => {
+      const webhookEvent = entry.messaging[0];
+      console.log("Message received:", webhookEvent);
 
-      if (event.message && event.message.text) {
-        const text = event.message.text;
-        console.log("Received:", text);
-
-        // Reply
-        await sendText(sender, "Bot received: " + text);
+      if (webhookEvent.message) {
+        handleMessage(webhookEvent.sender.id, webhookEvent.message);
       }
-    }
+    });
 
     res.status(200).send("EVENT_RECEIVED");
   } else {
@@ -59,35 +47,40 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// --------------------
-// SEND TEXT MESSAGE
-// --------------------
-async function sendText(sender_psid, message) {
-  const url = `https://graph.facebook.com/v20.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
+// Simple reply handler
+function handleMessage(senderPsid, receivedMessage) {
+  let response = {};
 
-  const payload = {
-    recipient: { id: sender_psid },
-    message: { text: message }
-  };
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" }
-    });
-
-    const data = await res.json();
-    if (data.error) {
-      console.error("Facebook API error:", data.error);
-    }
-  } catch (err) {
-    console.error("Fetch error:", err);
+  if (receivedMessage.text) {
+    response = {
+      text: `You said: ${receivedMessage.text}`
+    };
   }
+
+  callSendAPI(senderPsid, response);
 }
 
-// --------------------
-// START SERVER
-// --------------------
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+// Send message API
+function callSendAPI(senderPsid, response) {
+  const requestBody = {
+    recipient: { id: senderPsid },
+    message: response
+  };
+
+  request({
+    uri: "https://graph.facebook.com/v18.0/me/messages",
+    qs: { access_token: PAGE_ACCESS_TOKEN },
+    method: "POST",
+    json: requestBody
+  }, (err) => {
+    if (err) {
+      console.error("Unable to send message:", err);
+    }
+  });
+}
+
+// Start server
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
